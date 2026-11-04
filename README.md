@@ -23,9 +23,10 @@ Run `build.bat` (uses Zig and CMake).
 
 ### Linux (SDL2)
 1. Install SDL2: `sudo apt install libsdl2-dev`
-2. Run `chmod +x build.sh && ./build.sh` (uses CMake).
+2. Install SDL_mixer (required for music): `sudo apt install libsdl2-mixer-dev`
+3. Run `chmod +x build.sh && ./build.sh` (uses CMake).
 
-*Linux (SDL2): Video, input, and SFX are fully implemented. Music (MUS->MIDI) is currently WIP. Build via ./build.sh.*
+*Linux (SDL2): Video, input, SFX, and music are fully implemented (MUS lumps are converted to MIDI in memory and played via SDL_mixer). Build via ./build.sh.*
 
 ## 📂 Project Structure
 - `src/` — Portable C++ sources
@@ -58,6 +59,6 @@ The source code is licensed under the **GNU General Public License v2 (GPLv2)**.
 
 ### 🛠️ Как собрать
 **Windows:** Запустите `build.bat` (требуется Zig и CMake).
-**Linux:** Установите SDL2, затем запустите `chmod +x build.sh && ./build.sh`.
+**Linux:** Установите SDL2 (`sudo apt install libsdl2-dev`) и SDL_mixer (`sudo apt install libsdl2-mixer-dev`, требуется для музыки), затем запустите `chmod +x build.sh && ./build.sh`.
 
-*Linux (SDL2): Видео, ввод и звуковые эффекты (SFX) полностью работают. Музыка (MUS->MIDI) пока в разработке. Сборка через ./build.sh.*
+*Linux (SDL2): Видео, ввод, звуковые эффекты (SFX) и музыка полностью работают (MUS-треки конвертируются в MIDI в памяти и играются через SDL_mixer). Сборка через ./build.sh.*

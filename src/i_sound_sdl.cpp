@@ -21,6 +21,7 @@
 #include <math.h>
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_mixer.h>
 
 #include "doomstat.h"
 #include "i_sound.h"
@@ -584,64 +585,689 @@ void I_ShutdownSound(void)
 //                          MUSIC
 // ===========================================================================
 //
-// Stub for now. The Win32 backend converts the MUS lump to MIDI and plays
-// it through MCI; SDL2 has no built-in MUS/MIDI player. The game runs and
-// mixes SFX; music is silently absent until a proper SDL2 music backend
-// (e.g. SDL_mixer or a native MUS/OPL renderer) lands.
+// MUS -> MIDI conversion (ported verbatim from i_sound_w32.cpp: the Ben
+// Ryves mus2mid algorithm as used by Chocolate Doom) + SDL_mixer playback.
+// The converted type-0 MIDI stays in memory and is handed to SDL_mixer via
+// a read-only RWops - no temp file needed.
 //
-// The no-op implementations keep the S_*() API contract intact.
+// NOTE: MIDI playback inside SDL2_mixer is an optional backend; Debian's
+// libsdl2-mixer-2.0-0 ships it, but a distro build without MIDI support
+// will fail Mix_LoadMUS_RW - we log and keep running with SFX only.
 //
+// ===========================================================================
+
+// Growable (fixed-cap) output buffer for the converted MIDI stream.
+typedef struct
+{
+    byte*   data;
+    size_t  len;
+    size_t  cap;
+    int     overflow;
+} membuf_t;
+
+static void mb_put(membuf_t* b, byte v)
+{
+    if (b->len < b->cap)
+        b->data[b->len++] = v;
+    else
+        b->overflow = 1;
+}
+
+static void mb_write(membuf_t* b, const byte* p, size_t n)
+{
+    size_t i;
+    for (i=0 ; i<n ; ++i)
+        mb_put(b, p[i]);
+}
+
+#define NUM_MIDICHANS       16
+#define MIDI_PERCUSSION_CHAN 9
+#define MUS_PERCUSSION_CHAN  15
+
+// MUS event codes
+enum
+{
+    mus_releasekey       = 0x00,
+    mus_presskey         = 0x10,
+    mus_pitchwheel       = 0x20,
+    mus_systemevent      = 0x30,
+    mus_changecontroller = 0x40,
+    mus_scoreend         = 0x60
+};
+
+// MIDI event codes
+enum
+{
+    midi_releasekey       = 0x80,
+    midi_presskey         = 0x90,
+    midi_changecontroller = 0xB0,
+    midi_changepatch      = 0xC0,
+    midi_pitchwheel       = 0xE0
+};
+
+// Standard MIDI type 0 header + track header
+static const byte midiheader[] =
+{
+    'M', 'T', 'h', 'd',     // Main header
+    0x00, 0x00, 0x00, 0x06, // Header size
+    0x00, 0x00,             // MIDI type (0)
+    0x00, 0x01,             // Number of tracks
+    0x00, 0x46,             // Resolution
+    'M', 'T', 'r', 'k',     // Start of track
+    0x00, 0x00, 0x00, 0x00  // Placeholder for track length
+};
+
+// Cached channel velocities
+static byte channelvelocities[NUM_MIDICHANS];
+
+// Timestamps between sequences of MUS events
+static unsigned int queuedtime = 0;
+
+// Counter for the length of the track
+static unsigned int tracksize;
+
+static const byte controller_map[] =
+{
+    0x00, 0x20, 0x01, 0x07, 0x0A, 0x0B, 0x5B, 0x5D,
+    0x40, 0x43, 0x78, 0x7B, 0x7E, 0x7F, 0x79
+};
+
+static int channel_map[NUM_MIDICHANS];
+
+static boolean WriteTime(unsigned int time, membuf_t* out)
+{
+    unsigned int buffer = time & 0x7F;
+
+    while ((time >>= 7) != 0)
+    {
+        buffer <<= 8;
+        buffer |= ((time & 0x7F) | 0x80);
+    }
+
+    for (;;)
+    {
+        byte writeval = (byte)(buffer & 0xFF);
+
+        mb_put(out, writeval);
+        if (out->overflow)
+            return true;
+
+        ++tracksize;
+
+        if ((buffer & 0x80) != 0)
+        {
+            buffer >>= 8;
+        }
+        else
+        {
+            queuedtime = 0;
+            return false;
+        }
+    }
+}
+
+static boolean WriteEndTrack(membuf_t* out)
+{
+    byte endtrack[] = {0xFF, 0x2F, 0x00};
+
+    if (WriteTime(queuedtime, out))
+        return true;
+
+    mb_write(out, endtrack, 3);
+    if (out->overflow)
+        return true;
+
+    tracksize += 3;
+    return false;
+}
+
+static boolean WritePressKey(byte channel, byte key, byte velocity,
+                             membuf_t* out)
+{
+    byte working[3];
+    working[0] = (byte)(midi_presskey | channel);
+    working[1] = (byte)(key & 0x7F);
+    working[2] = (byte)(velocity & 0x7F);
+
+    if (WriteTime(queuedtime, out))
+        return true;
+
+    mb_write(out, working, 3);
+    if (out->overflow)
+        return true;
+
+    tracksize += 3;
+    return false;
+}
+
+static boolean WriteReleaseKey(byte channel, byte key, membuf_t* out)
+{
+    byte working[3];
+    working[0] = (byte)(midi_releasekey | channel);
+    working[1] = (byte)(key & 0x7F);
+    working[2] = 0;
+
+    if (WriteTime(queuedtime, out))
+        return true;
+
+    mb_write(out, working, 3);
+    if (out->overflow)
+        return true;
+
+    tracksize += 3;
+    return false;
+}
+
+static boolean WritePitchWheel(byte channel, short wheel, membuf_t* out)
+{
+    byte working[3];
+    working[0] = (byte)(midi_pitchwheel | channel);
+    working[1] = (byte)(wheel & 0x7F);
+    working[2] = (byte)((wheel >> 7) & 0x7F);
+
+    if (WriteTime(queuedtime, out))
+        return true;
+
+    mb_write(out, working, 3);
+    if (out->overflow)
+        return true;
+
+    tracksize += 3;
+    return false;
+}
+
+static boolean WriteChangePatch(byte channel, byte patch, membuf_t* out)
+{
+    byte working[2];
+    working[0] = (byte)(midi_changepatch | channel);
+    working[1] = (byte)(patch & 0x7F);
+
+    if (WriteTime(queuedtime, out))
+        return true;
+
+    mb_write(out, working, 2);
+    if (out->overflow)
+        return true;
+
+    tracksize += 2;
+    return false;
+}
+
+static boolean WriteChangeController_Valued(byte channel, byte control,
+                                            byte value, membuf_t* out)
+{
+    byte working[3];
+    working[0] = (byte)(midi_changecontroller | channel);
+    working[1] = (byte)(control & 0x7F);
+
+    // Quirk in vanilla DOOM? MUS controller values should be
+    // 7-bit, not 8-bit. Fix to stop MIDI players complaining.
+    working[2] = value;
+    if (working[2] & 0x80)
+        working[2] = 0x7F;
+
+    if (WriteTime(queuedtime, out))
+        return true;
+
+    mb_write(out, working, 3);
+    if (out->overflow)
+        return true;
+
+    tracksize += 3;
+    return false;
+}
+
+static boolean WriteChangeController_Valueless(byte channel, byte control,
+                                               membuf_t* out)
+{
+    return WriteChangeController_Valued(channel, control, 0, out);
+}
+
+// Allocate a free MIDI channel.
+static int AllocateMIDIChannel(void)
+{
+    int result;
+    int max = -1;
+    int i;
+
+    // Find the current highest-allocated channel.
+    for (i=0 ; i<NUM_MIDICHANS ; ++i)
+        if (channel_map[i] > max)
+            max = channel_map[i];
+
+    // max is now equal to the highest-allocated MIDI channel. We can
+    // now allocate the next available channel. This also works if
+    // no channels are currently allocated (max=-1).
+    result = max + 1;
+
+    // Don't allocate the MIDI percussion channel!
+    if (result == MIDI_PERCUSSION_CHAN)
+        ++result;
+
+    return result;
+}
+
+// Given a MUS channel number, get the MIDI channel number to use.
+static int GetMIDIChannel(int mus_channel, membuf_t* out)
+{
+    // MUS channel 15 is the percussion channel.
+    if (mus_channel == MUS_PERCUSSION_CHAN)
+    {
+        return MIDI_PERCUSSION_CHAN;
+    }
+    else
+    {
+        if (channel_map[mus_channel] == -1)
+        {
+            channel_map[mus_channel] = AllocateMIDIChannel();
+
+            // First time using the channel, send an "all notes off"
+            // event. This fixes "The D_DDTBLU disease".
+            WriteChangeController_Valueless(channel_map[mus_channel],
+                                            0x7b, out);
+        }
+
+        return channel_map[mus_channel];
+    }
+}
+
+static unsigned short rd16le(const byte* p)
+{
+    return (unsigned short)(p[0] | (p[1] << 8));
+}
+
+// Read a MUS file from a buffer and output a type-0 MIDI file.
+// Returns 0 on success, 1 on failure.
+static int mus2mid(const byte* mus, int muslen, membuf_t* out)
+{
+    int pos;
+    int end_limit;
+    int hitscoreend = 0;
+    int i;
+
+    if (muslen < 16)
+        return 1;
+
+    if (mus[0] != 'M' || mus[1] != 'U' || mus[2] != 'S' || mus[3] != 0x1A)
+        return 1;
+
+    {
+        unsigned short scorelength = rd16le(mus + 4);
+        unsigned short scorestart  = rd16le(mus + 6);
+        pos = scorestart;
+        // The score is scorelength bytes starting at scorestart;
+        // allow a little slack, but never read past the lump.
+        end_limit = scorestart + scorelength + 64;
+        if (end_limit > muslen)
+            end_limit = muslen;
+        if (pos < 0 || pos >= end_limit)
+            return 1;
+    }
+
+    // Initialise channel map to mark all channels as unused.
+    for (i=0 ; i<NUM_MIDICHANS ; ++i)
+    {
+        channel_map[i] = -1;
+        channelvelocities[i] = 127;
+    }
+
+    // So, we can assume the MUS file is faintly legit. Let's start
+    // writing MIDI data...
+    mb_write(out, midiheader, sizeof(midiheader));
+    if (out->overflow)
+        return 1;
+    tracksize = 0;
+    queuedtime = 0;
+
+    // Now, process the MUS file:
+    while (!hitscoreend)
+    {
+        byte eventdescriptor;
+        byte key;
+        byte controllernumber;
+        byte controllervalue;
+        int  channel;
+
+        if (pos >= end_limit)
+            return 1;
+        eventdescriptor = mus[pos++];
+
+        channel = GetMIDIChannel(eventdescriptor & 0x0F, out);
+        if (out->overflow)
+            return 1;
+
+        switch (eventdescriptor & 0x70)
+        {
+            case mus_releasekey:
+                if (pos >= end_limit) return 1;
+                key = mus[pos++];
+                if (WriteReleaseKey(channel, key, out)) return 1;
+                break;
+
+            case mus_presskey:
+                if (pos >= end_limit) return 1;
+                key = mus[pos++];
+                if (key & 0x80)
+                {
+                    if (pos >= end_limit) return 1;
+                    channelvelocities[eventdescriptor & 0x0F] =
+                        (byte)(mus[pos++] & 0x7F);
+                }
+                if (WritePressKey(channel, key,
+                                  channelvelocities[eventdescriptor & 0x0F],
+                                  out)) return 1;
+                break;
+
+            case mus_pitchwheel:
+                if (pos >= end_limit) return 1;
+                key = mus[pos++];
+                if (WritePitchWheel(channel, (short)(key * 64), out)) return 1;
+                break;
+
+            case mus_systemevent:
+                if (pos >= end_limit) return 1;
+                controllernumber = mus[pos++];
+                if (controllernumber < 10 || controllernumber > 14)
+                    return 1;
+                if (WriteChangeController_Valueless(
+                        channel, controller_map[controllernumber], out))
+                    return 1;
+                break;
+
+            case mus_changecontroller:
+                if (pos >= end_limit) return 1;
+                controllernumber = mus[pos++];
+                if (pos >= end_limit) return 1;
+                controllervalue = mus[pos++];
+
+                if (controllernumber == 0)
+                {
+                    if (WriteChangePatch(channel, controllervalue, out))
+                        return 1;
+                }
+                else
+                {
+                    if (controllernumber < 1 || controllernumber > 9)
+                        return 1;
+                    if (WriteChangeController_Valued(
+                            channel, controller_map[controllernumber],
+                            controllervalue, out))
+                        return 1;
+                }
+                break;
+
+            case mus_scoreend:
+                hitscoreend = 1;
+                break;
+
+            default:
+                return 1;
+        }
+
+        if (!hitscoreend && (eventdescriptor & 0x80))
+        {
+            // Now we need to read the time code:
+            unsigned int timedelay = 0;
+            for (;;)
+            {
+                byte working;
+                if (pos >= end_limit) return 1;
+                working = mus[pos++];
+                timedelay = timedelay * 128 + (working & 0x7F);
+                if ((working & 0x80) == 0)
+                    break;
+            }
+            queuedtime += timedelay;
+        }
+    }
+
+    // End of track
+    if (WriteEndTrack(out))
+        return 1;
+
+    // Write the track size into the stream (offset 18 in the header).
+    if (out->len < 22)
+        return 1;
+    out->data[18] = (byte)((tracksize >> 24) & 0xff);
+    out->data[19] = (byte)((tracksize >> 16) & 0xff);
+    out->data[20] = (byte)((tracksize >> 8) & 0xff);
+    out->data[21] = (byte)(tracksize & 0xff);
+
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// SDL_mixer music state
+// ---------------------------------------------------------------------------
+
+// Keep a small slot table: s_sound registers a new song and may unregister
+// the current one later; handles are the 1-based slot numbers. The
+// converted MIDI buffer stays alive for the whole Mix_Music lifetime
+// because streamable loaders may read from it lazily.
+#define SDL_MAX_SONGS 8
+
+typedef struct
+{
+    int         inuse;
+    Mix_Music*  mus;
+    byte*       midibuf;     // the converted MIDI, freed at UnRegister
+} sdl_song_t;
+
+static sdl_song_t sdl_songs[SDL_MAX_SONGS];
+static int        sdl_cur_song = 0;   // handle currently fed to the mixer
+static boolean    sdl_music_open = false;
 
 void I_InitMusic (void)
 {
+    if (sdl_music_open)
+        return;
+
+    if (Mix_Init(MIX_INIT_MID) == 0)
+    {
+        char msg[512];
+        sprintf(msg, "I_InitMusic: Mix_Init(MID) reported: %s\n",
+                SDL_GetError());
+        fprintf(stderr, "%s", msg);
+        // Not fatal: some SDL_mixer builds load MIDI without this flag.
+    }
+
+    // Same parameters as the SFX device: 11025 Hz, signed 16-bit, stereo.
+    // SDL2 allows several audio devices per process, so music and the
+    // SFX mixer coexist.
+    if (Mix_OpenAudio(SAMPLERATE, AUDIO_S16SYS, 2, 512) < 0)
+    {
+        fprintf(stderr, "I_InitMusic: Mix_OpenAudio failed: %s\n",
+                Mix_GetError());
+        return;
+    }
+
+    Mix_VolumeMusic(0);     // silent until S_SetMusicVolume says otherwise
+    sdl_music_open = true;
 }
 
 void I_ShutdownMusic (void)
 {
+    int i;
+
+    if (!sdl_music_open)
+        return;
+
+    Mix_HaltMusic();
+    for (i=0 ; i<SDL_MAX_SONGS ; ++i)
+    {
+        if (sdl_songs[i].inuse)
+        {
+            if (sdl_songs[i].mus)
+                Mix_FreeMusic(sdl_songs[i].mus);
+            free(sdl_songs[i].midibuf);
+            sdl_songs[i].inuse = 0;
+        }
+    }
+    sdl_cur_song = 0;
+    Mix_CloseAudio();
+    Mix_Quit();
+    sdl_music_open = false;
 }
 
 void I_SetMusicVolume (int volume)
 {
-    (void)volume;
+    // Menu values are 0..15 (S_SetMusicVolume also passes 127 first as
+    // a DMX-era quirk; clamping turns that into full volume, and the
+    // follow-up call with the real value always wins).
+    if (volume < 0)  volume = 0;
+    if (volume > 15) volume = 15;
+
+    if (sdl_music_open)
+        Mix_VolumeMusic(volume * SDL_MIX_MAXVOLUME / 15);
 }
 
-// NOP.
+// NOP: only meaningful while a song is registered.
 void I_PauseSong (int handle)
 {
     (void)handle;
+    if (sdl_music_open && sdl_cur_song)
+        Mix_PauseMusic();
 }
 
 // NOP.
 void I_ResumeSong (int handle)
 {
     (void)handle;
+    if (sdl_music_open && sdl_cur_song)
+        Mix_ResumeMusic();
 }
 
 //
-// Songs merely say "registered"; nothing is actually playable yet.
+// Convert the raw MUS lump to type-0 MIDI in memory and load it into
+// SDL_mixer. Returns a positive handle, or 0 on failure (no music).
 //
 int I_RegisterSong (void* data, int length)
 {
-    (void)data;
-    (void)length;
-    return 1;
+    membuf_t out;
+    byte*    midi = 0;
+    int      i;
+    int      slot = 0;
+
+    if (!sdl_music_open)
+        I_InitMusic();
+    if (!sdl_music_open)
+        return 0;
+
+    // Find a free slot; songs are short-lived, 8 is far more than enough.
+    for (i=0 ; i<SDL_MAX_SONGS ; ++i)
+    {
+        if (!sdl_songs[i].inuse)
+        {
+            slot = i;
+            break;
+        }
+    }
+    if (i == SDL_MAX_SONGS)
+    {
+        fprintf(stderr, "I_RegisterSong: no free song slot\n");
+        return 0;
+    }
+
+    out.cap = 2 * 1024 * 1024;
+    out.data = (byte*)malloc(out.cap);
+    out.len = 0;
+    out.overflow = 0;
+    if (!out.data)
+        return 0;
+
+    if (mus2mid((const byte*)data, length, &out) != 0)
+    {
+        free(out.data);
+        fprintf(stderr, "I_RegisterSong: bad MUS lump, no music\n");
+        return 0;
+    }
+
+    // Shrink to the exact converted size; the buffer must outlive the
+    // Mix_Music, so it is kept in the slot.
+    midi = (byte*)malloc(out.len + 1);
+    if (!midi)
+    {
+        free(out.data);
+        return 0;
+    }
+    memcpy(midi, out.data, out.len);
+    free(out.data);
+    out.data = 0;
+
+    sdl_songs[slot].midibuf = midi;
+
+    // Hand the in-memory MIDI straight to SDL_mixer (freesrc=1 disposes
+    // of the RWops wrapper, data ownership stays with us).
+    {
+        SDL_RWops* src = SDL_RWFromConstMem(midi, (int)out.len);
+        if (src)
+        {
+            sdl_songs[slot].mus = Mix_LoadMUS_RW(src, 1);
+        }
+    }
+    if (!sdl_songs[slot].mus)
+    {
+        fprintf(stderr, "I_RegisterSong: Mix_LoadMUS failed: %s\n",
+                Mix_GetError());
+        fprintf(stderr, "  (Is your SDL2_mixer built with MIDI support? "
+                        "Debian: libsdl2-mixer-2.0-0 ships it)\n");
+        free(sdl_songs[slot].midibuf);
+        sdl_songs[slot].midibuf = 0;
+        return 0;
+    }
+
+    sdl_songs[slot].inuse = 1;
+    return slot + 1;        // 1-based handle
 }
 
-// NOP.
 void I_PlaySong (int handle, int looping)
 {
-    (void)handle;
-    (void)looping;
+    if (!sdl_music_open || handle <= 0 || handle > SDL_MAX_SONGS)
+        return;
+    if (!sdl_songs[handle-1].inuse || !sdl_songs[handle-1].mus)
+        return;
+
+    // -1 makes SDL_mixer loop the track forever.
+    if (Mix_PlayMusic(sdl_songs[handle-1].mus, looping ? -1 : 1) == 0)
+        sdl_cur_song = handle;
+    else
+    {
+        fprintf(stderr, "I_PlaySong: Mix_PlayMusic failed: %s\n",
+                Mix_GetError());
+        sdl_cur_song = 0;
+    }
 }
 
-// NOP.
 void I_StopSong(int handle)
 {
     (void)handle;
+    if (!sdl_music_open)
+        return;
+
+    Mix_HaltMusic();
+    sdl_cur_song = 0;
 }
 
-// NOP.
 void I_UnRegisterSong(int handle)
 {
-    (void)handle;
+    int slot;
+
+    if (!sdl_music_open || handle <= 0 || handle > SDL_MAX_SONGS)
+        return;
+
+    slot = handle - 1;
+    if (!sdl_songs[slot].inuse)
+        return;
+
+    if (sdl_cur_song == handle)
+    {
+        Mix_HaltMusic();
+        sdl_cur_song = 0;
+    }
+    if (sdl_songs[slot].mus)
+        Mix_FreeMusic(sdl_songs[slot].mus);
+    free(sdl_songs[slot].midibuf);
+    sdl_songs[slot].mus = 0;
+    sdl_songs[slot].midibuf = 0;
+    sdl_songs[slot].inuse = 0;
 }

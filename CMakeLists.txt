@@ -70,6 +70,11 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     # Linux: SDL2 video + SDL2 sound backends.
     find_package(SDL2 REQUIRED)
+    # Music: MUS lumps are converted to MIDI in memory and played by
+    # SDL_mixer. On Debian this is libsdl2-mixer-dev; its CMake config
+    # exports the target under different names depending on the version,
+    # hence the fallbacks below.
+    find_package(SDL2_mixer REQUIRED)
     target_sources(doom PRIVATE
         src/i_video_sdl.cpp
         src/i_sound_sdl.cpp
@@ -82,6 +87,19 @@ elseif(UNIX AND NOT APPLE)
     else()
         target_include_directories(doom PRIVATE ${SDL2_INCLUDE_DIRS})
         target_link_libraries(doom PRIVATE ${SDL2_LIBRARIES})
+    endif()
+    if(TARGET SDL2_mixer::SDL2_mixer)           # official sdl2-mixer config
+        target_link_libraries(doom PRIVATE SDL2_mixer::SDL2_mixer)
+    elseif(TARGET SDL2_mixer::mixer)            # older config name
+        target_link_libraries(doom PRIVATE SDL2_mixer::mixer)
+    elseif(TARGET SDL2_mixer::SDL2_mixer-static)
+        target_link_libraries(doom PRIVATE SDL2_mixer::SDL2_mixer-static)
+    else()
+        # Fallback: variables from FindSDL2_mixer.cmake-style modules.
+        if(SDL2_MIXER_INCLUDE_DIRS)
+            target_include_directories(doom PRIVATE ${SDL2_MIXER_INCLUDE_DIRS})
+        endif()
+        target_link_libraries(doom PRIVATE ${SDL2_MIXER_LIBRARIES})
     endif()
 endif()
 
