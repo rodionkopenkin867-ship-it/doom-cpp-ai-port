@@ -399,7 +399,12 @@ R_StoreWallRange
     
     // calculate rw_distance for scale calculation
     rw_normalangle = curline->angle + ANG90;
-    offsetangle = abs(rw_normalangle-rw_angle1);
+    // Plain abs() is ambiguous here: the angle subtraction yields unsigned
+    // arithmetic and C++ drags in float/long abs() overloads alongside
+    // int abs(int). Do the unsigned-safe trick explicitly.
+    offsetangle = rw_normalangle-rw_angle1;
+    if (offsetangle > 0x80000000u)
+	offsetangle = 0x80000000u - offsetangle;
     
     if (offsetangle > ANG90)
 	offsetangle = ANG90;

@@ -41,6 +41,17 @@ else()
         -fno-exceptions
         -fno-rtti
         -fpermissive
+        # parity with the original zig c++ build (build.ps1): the DOOM source
+        # contains decades-old unaligned packed-WAD accesses; the zig/clang
+        # runtime alignment+UB checks abort with a panic otherwise.
+        -fno-sanitize=undefined
+        -fno-sanitize=alignment
+    )
+    # Same flags at link time so the compiler driver matches the original
+    # one-line zig c++ invocation of build.ps1.
+    target_link_options(doom PRIVATE
+        -fno-sanitize=undefined
+        -fno-sanitize=alignment
     )
 endif()
 
@@ -75,3 +86,16 @@ endif()
 set_target_properties(doom PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
+
+# CMake places the binary into build/ (or build/<config>/ for multi-config
+# generators), while the IWAD lives in the repo root. Copy every *.wad next
+# to the executable so a freshly built doom.exe can find it right away.
+file(GLOB WAD_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.wad")
+if(WAD_FILES)
+    add_custom_command(TARGET doom POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${WAD_FILES}
+                $<TARGET_FILE_DIR:doom>
+        COMMENT "Copying WAD files next to the doom executable"
+        VERBATIM
+    )
+endif()
