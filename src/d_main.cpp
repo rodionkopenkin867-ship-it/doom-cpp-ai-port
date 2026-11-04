@@ -622,7 +622,11 @@ void IdentifyVersion (void)
 	home = getenv("HOME");
     if (!home)
       I_Error("Please set $HOME to your home directory");
+#ifdef _WIN32
     sprintf(basedefault, "%s\\.doomrc", home);
+#else
+    sprintf(basedefault, "%s/.doomrc", home);
+#endif
 #endif
 
     if (M_CheckParm ("-shdev"))

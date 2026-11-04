@@ -24,6 +24,14 @@
 
 #include "doomstat.h"
 #include "i_sound.h"
+#include "i_system.h"
+#include "z_zone.h"
+#include "w_wad.h"
+#include "m_argv.h"
+
+// Kept for the defaults table (m_misc.cpp references it); our SDL2 sound
+// backend runs in-process, so no external server binary is spawned.
+char* sndserver_filename = (char*)"./sndserver ";
 
 // The number of internal mixing channels.
 #define NUM_CHANNELS    8
@@ -514,7 +522,8 @@ void I_InitSound (void)
             lengths[i] = lengths[(S_sfx[i].link - S_sfx)/sizeof(sfxinfo_t)];
         }
     }
-    I_SetChannels();
+    // NOTE: I_SetChannels() is called by S_Init() in s_sound.c after the
+    // engine asks us to init, exactly like the Win32 backend assumes.
 
     // Open the SDL audio device: 11025 Hz, stereo, signed 16-bit.
     {
