@@ -34,7 +34,15 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #ifdef NORMALUNIX
 #include <stdio.h>
 #include <stdlib.h>
-#include "w32compat.h"
+#ifdef _WIN32
+#include "w32compat.h"     // POSIX shims over the Windows CRT
+#else
+#include <string.h>     // strrchr, strlen
+#include <strings.h>    // strcasecmp (POSIX)
+#include <unistd.h>     // access, R_OK
+#include <dirent.h>     // mods folder scan
+#include <sys/stat.h>   // mkdir
+#endif
 #endif
 
 
@@ -964,6 +972,7 @@ void D_DoomMain (void)
     // Auto-load PWAD mods from the "mods" folder next to the exe.
     // Loaded after -file so explicit -file wads can still be overridden
     // by mod wads (W_AddFile order = resource precedence).
+#ifdef _WIN32
     {
 	char        moddir[256];
 	char        path[256];
@@ -1007,6 +1016,49 @@ void D_DoomMain (void)
 	    FindClose (fh);
 	}
     }
+#else
+    {
+	char        moddir[256];
+	char        path[512];
+	char*       exeEnd;
+        DIR*        dir;
+        struct dirent* dent;
+
+	// exe dir = dirname(argv[0])
+	strncpy (moddir, myargv[0], sizeof(moddir)-1);
+	moddir[sizeof(moddir)-1] = 0;
+	exeEnd = strrchr (moddir, '/');
+	if (exeEnd)
+	    *(exeEnd+1) = 0;
+	else
+	    moddir[0] = 0;             // no dir part: cwd
+
+	strcpy (path, moddir);
+	strcat (path, "mods");
+
+	dir = opendir (path);
+	if (dir)
+	{
+	    printf ("mods folder: loading PWADs from %smods\n",
+		    moddir);
+	    while ((dent = readdir (dir)))
+	    {
+		int len = strlen (dent->d_name);
+		if (len > 4
+		    && !strcasecmp (dent->d_name + len - 4, ".wad"))
+		{
+		    strcpy (path, moddir);
+		    strcat (path, "mods/");
+		    strcat (path, dent->d_name);
+		    printf ("  mod: %s\n", dent->d_name);
+		    D_AddFile (path);
+		    modifiedgame = true;
+		}
+	    }
+	    closedir (dir);
+	}
+    }
+#endif
 
     // Drag & Drop: a .wad dropped onto doom.exe arrives as argv[1]
     // (with -file handled above, a bare path would just be ignored).

@@ -29,9 +29,12 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #include <string.h>
 
 #include <stdarg.h>
-#include "w32compat.h"
-
-#include "doomdef.h"
+#ifdef _WIN32
+#include "w32compat.h"     // POSIX shims over the Windows CRT
+#else
+#include <time.h>       // clock_gettime
+#include <unistd.h>     // usleep
+#endif#include "doomdef.h"
 #include "m_misc.h"
 #include "i_video.h"
 #include "i_sound.h"
@@ -89,6 +92,7 @@ byte* I_ZoneBase (int*	size)
 // I_GetTime
 // returns time in 1/70th second tics
 //
+#ifdef _WIN32
 int  I_GetTime (void)
 {
     LARGE_INTEGER freq;
@@ -102,6 +106,21 @@ int  I_GetTime (void)
     // time in 1/70th of a second
     return (int)((counter.QuadPart - basetime) * TICRATE / freq.QuadPart);
 }
+#else
+int  I_GetTime (void)
+{
+    struct timespec now;
+    static long long basems = 0;
+    long long ms;
+
+    clock_gettime (CLOCK_MONOTONIC, &now);
+    ms = now.tv_sec * 1000LL + now.tv_nsec / 1000000L;
+    if (!basems)
+	basems = ms;
+    // time in 1/70th of a second
+    return (int)((ms - basems) * TICRATE / 1000);
+}
+#endif
 
 
 
@@ -129,7 +148,11 @@ void I_Quit (void)
 
 void I_WaitVBL(int count)
 {
+#ifdef _WIN32
     Sleep (count * (1000/70) );
+#else
+    usleep (count * (1000/70) * 1000);
+#endif
 }
 
 void I_BeginRead(void)

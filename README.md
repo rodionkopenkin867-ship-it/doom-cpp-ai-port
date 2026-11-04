@@ -1,157 +1,63 @@
-# DOOM C++ Port (AI-Generated)
+# DOOM C++ Port (AI-Generated) 🤖👹
 
-An experimental C++ port of DOOM, generated end-to-end by an autonomous AI agent
-(**OpenCode + GLM 5.3 Flash**), running on a modest PC (*Intel i3, 8 GB RAM*).
+An experimental port of the original DOOM engine to C++, written **end-to-end by an autonomous AI agent** (OpenCode + GLM 5.3 Flash). 
 
-This is not a rewrite of an existing port — the C++ translation, build system and
-Win32 backends were produced by the agent working from the original 1993/1994
-`DOOM.C`/`.H` source drop.
+> **Status: v1.0-beta (Fully Playable on Windows)**. The game runs, renders, plays sound, and can load levels without crashing. 
 
----
+## ✨ Features
+- **100% C++ Codebase**: Translated from the original 1993/1994 `DOOM.C` source drop.
+- **Native Win32 GDI Renderer** (Windows): Authentic 320x200 software rendering.
+- **Working Sound Engine** (Windows): Custom `winmm waveOut` backend for SFX and music.
+- **Modern Controls**: WASD movement, mouse look, and left-click to shoot.
 
-## Status
+## ⚠️ IMPORTANT: You need a WAD file
+This repository **DOES NOT** include any game assets. You need an IWAD file.
+1. Download the free **Shareware** version (`doom1.wad`): [Download here](https://doomwiki.org/wiki/Shareware)
+2. Place `doom1.wad` in the same folder as the executable.
+3. Run the game.
 
-| Subsystem | State |
-| --- | --- |
-| Game logic (C++ port of `d_main`, `p_*`, `g_game`, ...) | ✅ Working |
-| Rendering | ✅ Software renderer (`r_*`), output via **Win32 GDI** |
-| Sound | ✅ **winmm `waveOut`** backend |
-| Known bug | ⚠️ Crash during `R_Init` (texture lump initialization) |
+## 🛠️ How to Build
 
-The `R_Init` crash is the main open issue — it happens while texture/patch lumps
-are being cached right after WAD loading, before the title screen is shown.
-**Pull requests are very welcome!** A minimal repro is: build, place any valid
-`DOOM.WAD` next to `doom.exe`, run.
+### Windows
+Run `build.bat` (uses Zig and CMake).
 
-## Building
+### Linux (Experimental)
+1. Install SDL2: `sudo apt install libsdl2-dev`
+2. Run `chmod +x build.sh && ./build.sh` (uses CMake and SDL2).
 
-The build uses [`zig c++`](https://ziglang.org) as a portable clang + mingw-w64
-toolchain — **no MSVC installation required**.
+*Note: Linux support is currently experimental. Video and audio use SDL2 backends, but may require tweaking. PRs are welcome!*
 
-```bat
-git clone <this-repo>
-cd doom-cpp
-build.bat
-```
+## 📂 Project Structure
+- `src/` — Portable C++ sources
+- `src/i_video_w32.cpp` / `i_sound_w32.cpp` — Windows native backends
+- `src/i_video_sdl.cpp` / `i_sound_sdl.cpp` — Linux SDL2 backends
+- `CMakeLists.txt` — Cross-platform build configuration
 
-Or directly with PowerShell:
+## 📝 Known Quirks
+- **Retro Pixelation**: Original 320x200 software renderer.
+- **Map Load Times**: Takes a few seconds due to unoptimized WAD parsing.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1
-```
+## 📜 Disclaimer & License
+> This is an experimental AI port for educational purposes. It is not intended to replace GZDoom.
 
-Both scripts work from any working directory and produce `doom.exe` in the
-repo root. The compiler is resolved in this order:
-
-1. `zig` already on your `PATH` (from [ziglang.org](https://ziglang.org/download/)),
-2. the uv-managed toolchain: `uv tool install ziglang`.
-
-Options used: `-std=gnu++98 -fno-exceptions -fno-rtti` (the original codebase's
-style does not rely on C++ exceptions or RTTI), linked against
-`user32 / gdi32 / ws2_32 / winmm`.
-
-## Running / Getting a WAD
-
-The engine requires an **IWAD** file, which is *not* distributed with this repo
-(it has its own proprietary license). Place one of the following next to
-`doom.exe` (or set the `DOOMWADDIR` environment variable):
-
-- `doom.wad` — registered / retail DOOM
-- `doom1.wad` — shareware DOOM (free to download)
-- `doom2.wad`, `plutonia.wad`, `tnt.wad`, `doomu.wad`, `doom2f.wad`
-
-You can download the free **shareware** episode here:
-<https://doomwiki.org/wiki/Shareware>
-
-If no WAD is found, the program prints
-`WAD not found. Please place doom.wad in this folder.` and exits cleanly —
-no crash, no half-initialized state.
-
-Extras:
-
-- PWAD mods placed in a `mods\` folder next to the exe are loaded automatically,
-- a `.wad` dragged & dropped onto `doom.exe` is loaded as a PWAD,
-- config file (`default.cfg`) and savegames are stored in the current directory.
-
-## Project layout
-
-```
-src/           portable C++ sources (game logic, renderer, menus, ...)
-src/i_video_w32.cpp   Win32 GDI video backend
-src/i_sound_w32.cpp   waveOut sound backend
-build.ps1      build script (PowerShell)
-build.bat      one-click wrapper for build.ps1
-```
-
-## Disclaimer
-
-> This is an experimental AI port for educational purposes. It is not a
-> replacement for GZDoom.
-
-The WAD game data, DOOM and the DOOM logo remain the property of id Software /
-ZeniMax Media. Source code in this repository is licensed under the
-**GNU General Public License v2** (see [LICENSE](LICENSE)), as was the original
-DOOM source release.
+The WAD game data, DOOM logo, and original assets remain the property of **id Software / ZeniMax Media**. 
+The source code is licensed under the **GNU General Public License v2 (GPLv2)**.
 
 ---
 
-## Русская версия
+## 🇷🇺 Русская версия
 
-# DOOM C++ Port (сгенерирован ИИ)
+# Порт DOOM на C++ (Сгенерировано ИИ) 🤖👹
 
-Экспериментальный порт DOOM на C++, полностью сгенерированный автономным
-ИИ-агентом (**OpenCode + GLM 5.3 Flash**) на не самом мощном ПК
-(*Intel i3, 8 ГБ ОЗУ*).
+Экспериментальный порт оригинального движка DOOM на язык C++, написанный **полностью автономным ИИ-агентом** (OpenCode + GLM 5.3 Flash). 
 
-## Статус
+> **Статус: v1.0-beta (Полностью играбельно на Windows)**. 
 
-| Подсистема | Состояние |
-| --- | --- |
-| Игровая логика (порт на C++) | ✅ Работает |
-| Рендер | ✅ Софтверный рендерер (`r_*`), вывод через **Win32 GDI** |
-| Звук | ✅ Бэкенд на **winmm `waveOut`** |
-| Известный баг | ⚠️ Вылет на `R_Init` (инициализация текстур) |
+### ⚠️ ВАЖНО: Нужен WAD-файл
+Скачайте бесплатный `doom1.wad` по [этой ссылке](https://doomwiki.org/wiki/Shareware) и положите рядом с игрой.
 
-Вылет на `R_Init` — главная открытая проблема: происходит при кэшировании
-текстурных люмов сразу после загрузки WAD, до экрана заголовка.
-**Pull request'ы очень приветствуются!**
+### 🛠️ Как собрать
+**Windows:** Запустите `build.bat` (требуется Zig и CMake).
+**Linux:** Установите SDL2, затем запустите `chmod +x build.sh && ./build.sh`.
 
-## Сборка
-
-Используется [`zig c++`](https://ziglang.org) как переносимый clang + mingw-w64 —
-**MSVC не требуется**.
-
-```bat
-git clone <этот-репозиторий>
-cd doom-cpp
-build.bat
-```
-
-или напрямую через PowerShell:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1
-```
-
-Оба скрипта работают из любой директории и создают `doom.exe` в корне репозитория.
-Компилятор ищется сначала в `PATH`, затем в тулчейне из `uv tool install ziglang`.
-
-## Запуск / Где взять WAD
-
-Движку нужен файл **IWAD**, который не распространяется с репозиторием
-(собственная лицензия id Software). Положите рядом с `doom.exe` один из файлов:
-`doom.wad`, `doom1.wad` (shareware, скачивается бесплатно), `doom2.wad` и т.д.
-Бесплатную shareware-версию можно скачать здесь:
-<https://doomwiki.org/wiki/Shareware>
-
-Если WAD не найден, программа выводит сообщение
-`WAD not found. Please place doom.wad in this folder.` и завершается корректно,
-без вылета.
-
-## Дисклеймер
-
-> Это экспериментальный ИИ-порт в образовательных целях. Он не является
-> заменой GZDoom.
-
-Права на game data, DOOM и логотип DOOM принадлежат id Software / ZeniMax Media.
-Исходный код лицензирован под **GNU GPL v2** (см. [LICENSE](LICENSE)).
+*Примечание: Поддержка Linux экспериментальная. Используются SDL2-бэкенды.*

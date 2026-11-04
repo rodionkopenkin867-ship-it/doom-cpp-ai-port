@@ -1,4 +1,5 @@
 @echo off
-rem Convenience wrapper: run the PowerShell build script from any console,
-rem with script execution policy left untouched.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0build.ps1" %*
+rem Cross-platform build (Windows): configure and build with CMake.
+rem Requires CMake plus a compiler toolchain (e.g. Zig cc / mingw target) on PATH.
+cmake -B build
+cmake --build build --config Release
