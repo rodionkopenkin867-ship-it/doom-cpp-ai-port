@@ -1,0 +1,19 @@
+# Build outputs
+build/
+zig-cache/
+zig-out/
+*.exe
+*.obj
+*.pdb
+*.dll
+
+# Game data (never redistribute: DOOM WAD files are distributed
+# under their own proprietary license by id Software)
+*.wad
+
+# Editor / OS junk
+*.log
+build_cmake.log
+out.txt
+err.txt
+nul.*
