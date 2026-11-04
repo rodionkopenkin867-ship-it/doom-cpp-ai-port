@@ -13,6 +13,7 @@ zig-out/
 
 # Editor / OS junk
 *.log
+build_cmake.log
 out.txt
 err.txt
 nul.*

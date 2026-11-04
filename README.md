@@ -21,11 +21,11 @@ This repository **DOES NOT** include any game assets. You need an IWAD file.
 ### Windows
 Run `build.bat` (uses Zig and CMake).
 
-### Linux (Experimental)
+### Linux (SDL2)
 1. Install SDL2: `sudo apt install libsdl2-dev`
-2. Run `chmod +x build.sh && ./build.sh` (uses CMake and SDL2).
+2. Run `chmod +x build.sh && ./build.sh` (uses CMake).
 
-*Note: Linux support is currently experimental. Video and audio use SDL2 backends, but may require tweaking. PRs are welcome!*
+*Linux (SDL2): Video, input, and SFX are fully implemented. Music (MUS->MIDI) is currently WIP. Build via ./build.sh.*
 
 ## 📂 Project Structure
 - `src/` — Portable C++ sources
@@ -60,4 +60,4 @@ The source code is licensed under the **GNU General Public License v2 (GPLv2)**.
 **Windows:** Запустите `build.bat` (требуется Zig и CMake).
 **Linux:** Установите SDL2, затем запустите `chmod +x build.sh && ./build.sh`.
 
-*Примечание: Поддержка Linux экспериментальная. Используются SDL2-бэкенды.*
+*Linux (SDL2): Видео, ввод и звуковые эффекты (SFX) полностью работают. Музыка (MUS->MIDI) пока в разработке. Сборка через ./build.sh.*
